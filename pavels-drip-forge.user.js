@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      5.2
+// @version      5.3
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -35,7 +35,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.2';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.3';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -895,16 +895,39 @@
             options.filter(function (g) { return want.label && g.label.toLowerCase() === want.label.toLowerCase(); })[0] || null;
     }
 
-    // True when the page currently has a different group selected than the one we want.
+    // True when the page does not have exactly the wanted group selected (no group chosen, no list, or another group).
     function groupMismatch() {
         if (activeMode() !== 'group') return false;
         const want = wantedGroup();
-        if (!want.value && !want.label) return false;
+        if (!want.value && !want.label) return true;
         const sel = findGroupSelect();
-        if (!sel) return false;
+        if (!sel) return true;
         const opt = resolveGroupOpt(sel);
         if (!opt) return true;
         return String(sel.value) !== opt.value;
+    }
+
+    // Is this page the right one: #groupcreations with the group form showing (group mode),
+    // or the plain page without it (normal mode)? Returns an error text, or '' when all is fine.
+    function pageProblem() {
+        const mode = activeMode();
+        if (modeMismatch(mode)) {
+            return mode === 'group'
+                ? 'The page is not the group tab (' + GROUP_HASH + '), so nothing was sent. Try again.'
+                : 'The page is on the group tab instead of the normal upload page, so nothing was sent. Try again.';
+        }
+        if (mode === 'group') {
+            const e = getFormEls();
+            if (!e || !isShown(e.form)) return 'The group upload form is not showing on the page, so nothing was sent. Try again.';
+        }
+        return '';
+    }
+
+    function targetProblem() {
+        const p = pageProblem();
+        if (p) return p;
+        if (groupMismatch()) return 'The chosen group is not selected on the page, so nothing was sent. Try again.';
+        return '';
     }
 
     /* In group mode, makes sure the right group is picked in the site's own list.
@@ -912,10 +935,7 @@
     async function ensureGroupSelected() {
         if (activeMode() !== 'group') return false;
         await waitUntil(function () { return !!findGroupSelect() || !!getFormEls(); }, 15000);
-        if (!findGroupSelect()) {
-            log('No group list found on the page, using whatever the site has open.', 'debug');
-            return false;
-        }
+        if (!findGroupSelect()) throw new Error('The group list was not found on the page, so nothing was uploaded.');
         await waitUntil(function () {
             const s = findGroupSelect();
             return !!s && readGroupOptions(s).length > 0;
@@ -926,7 +946,7 @@
         if (cacheGroups(options)) renderGroupSelect();
 
         const want = wantedGroup();
-        if (!want.value && !want.label) return false;
+        if (!want.value && !want.label) throw new Error('No group is chosen. Pick one in Settings \u2192 Upload target.');
         const opt = resolveGroupOpt(sel);
         if (!opt) throw new Error('The group "' + (want.label || want.value) + '" is not in the site\'s group list.');
         if (String(sel.value) === opt.value) return false;
@@ -1412,7 +1432,8 @@
         if (!els) throw new Error('The upload form disappeared before submitting.');
         // Last line of defence: no await between this check and the click below, so the click
         // can never land on a group other than the chosen one.
-        if (groupMismatch()) throw new Error('The group changed on the page right before uploading, so nothing was sent. Try again.');
+        const tProblem = targetProblem();
+        if (tProblem) throw new Error(tProblem);
         const inf = {
             itemId: item.id,
             name: displayName,
@@ -1472,6 +1493,7 @@
         const totals = runTotals();
         setStatus('Uploading ' + Math.min(totals.total, totals.processed + 1) + ' of ' + totals.total + ': ' + itemLabel(item));
 
+        { const pp = pageProblem(); if (pp) throw new Error(pp); }
         await ensureGroupSelected();
         await waitForFormEls(20000);
 
@@ -1529,6 +1551,8 @@
                 setFileInput(els.file, blob, filename);
                 await sleep(300);
             }
+
+            { const tp = targetProblem(); if (tp) throw new Error(tp); }
 
             const ready = await waitUntil(function () {
                 const e = getFormEls();
