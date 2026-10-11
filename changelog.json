@@ -1,15 +1,5 @@
 [
   {
-    "version": "5.2",
-    "date": "2026-10-11",
-    "notes": [
-      "Fixed: uploading into a group could also drop an item into the first group. The group is now re-checked and must stay selected right before every upload",
-      "Changelog: older versions are now browsed page by page instead of all expanding at once",
-      "Redesigned the emergency update screen: step-by-step guide, scrollable What's new, Copy link and Check again buttons",
-      "Update links switched to refs/heads/main on GitHub for faster loading"
-    ]
-  },
-  {
     "version": "5.1",
     "date": "2026-10-11",
     "notes": [
