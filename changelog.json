@@ -1,5 +1,12 @@
 [
   {
+    "version": "4.8",
+    "date": "2026-10-11",
+    "notes": [
+      "Changelog in Settings now shows only the new versions; older ones are hidden behind a button"
+    ]
+  },
+  {
     "version": "4.7",
     "date": "2026-10-11",
     "notes": [
