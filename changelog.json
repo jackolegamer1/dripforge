@@ -1,5 +1,13 @@
 [
   {
+    "version": "5.0",
+    "date": "2026-10-11",
+    "notes": [
+      "Added RGB theme: the color smoothly cycles through the rainbow (idea by croweer)",
+      "Added Brightness and Pastel sliders for the RGB theme"
+    ]
+  },
+  {
     "version": "4.9",
     "date": "2026-10-11",
     "notes": [
