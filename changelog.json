@@ -1,5 +1,16 @@
 [
   {
+    "version": "5.2",
+    "date": "2026-10-11",
+    "notes": [
+      "Fixed: uploading into a group could also drop an item into the first group. The group is now re-checked after the form is filled and once more right before every upload, and the upload is cancelled if it does not match",
+      "Changelog: older versions are now browsed page by page (3 per page) with smooth slide animations instead of all expanding at once",
+      "RGB theme button is now a plain round swatch showing the live color, without the RGB label",
+      "Redesigned the emergency update screen: step-by-step guide, scrollable What's new, Copy link and Check again buttons",
+      "Update links switched to refs/heads/main on GitHub for faster loading"
+    ]
+  },
+  {
     "version": "5.1",
     "date": "2026-10-11",
     "notes": [
