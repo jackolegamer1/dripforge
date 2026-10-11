@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      4.8
+// @version      4.9
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -35,7 +35,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '4.8';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '4.9';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -1583,6 +1583,7 @@
 
     async function runQueue(isResume) {
         if (uploading) return;
+        if (forceLocked) return;
         const view = getView();
         if (!isCreatePage()) {
             setStatus('Open the Shirt, Pants or T-Shirt create page to upload.', 'warn');
@@ -1734,7 +1735,7 @@
     }
 
     async function maybeResume() {
-        if (resumeTried || uploading || resuming) return;
+        if (resumeTried || uploading || resuming || forceLocked) return;
         const run = readRun();
         if (!run || !ownsRun(run)) return;
         resumeTried = true;
@@ -2371,6 +2372,37 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 .cl-head span{color:var(--muted);font-size:11.5px}
 .cl-tag{padding:0 7px;border-radius:999px;background:var(--accent-soft);color:var(--ring)!important;font-weight:600}
 .cl-more{padding:10px 14px;border-top:1px solid var(--border)}
+.cl-new{background:color-mix(in srgb,var(--ok) 15%,transparent)!important;color:var(--ok)!important}
+/* smooth open/close (grid 0fr -> 1fr animates to the real content height) */
+.cl-toggle{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0 14px;border:0;border-top:1px solid var(--border);background:transparent;color:var(--text);font-weight:600;text-align:left;cursor:pointer;transition:background-color .2s}
+.cl-toggle:hover{background:var(--surface-2)}
+.cl-toggle>span:first-child{flex:1}
+.cl-meta{color:var(--muted);font-size:11.5px;font-weight:500}
+.cl-toggle .chev{flex-shrink:0;color:var(--muted);transition:transform .5s var(--spring)}
+.cl-toggle[aria-expanded="true"] .chev{transform:rotate(180deg)}
+.collapse{display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows .5s var(--ease),visibility 0s linear .5s}
+.collapse.open{grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .5s var(--ease),visibility 0s}
+.collapse>.collapse-in{min-height:0;overflow:hidden;opacity:0;transform:translateY(-8px);transition:opacity .3s var(--ease),transform .5s var(--ease)}
+.collapse.open>.collapse-in{opacity:1;transform:none}
+.collapse.open>.collapse-in>.cl{animation:clIn .55s var(--ease) both;animation-delay:calc(var(--i,0) * 60ms + 90ms)}
+@keyframes clIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+/* ---------- forced update lock ---------- */
+.lock{position:fixed;inset:0;z-index:2147483600;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,#05070d 64%,transparent);-webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2);animation:lockBg .35s var(--ease) both}
+.lock-card{zoom:var(--z,1);width:min(420px,100%);max-height:calc(90vh / var(--z,1));overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:22px;border:1px solid var(--border);border-radius:22px;background:var(--bg);color:var(--text);box-shadow:var(--shadow);animation:lockCard .6s var(--spring) .05s both}
+.lock-ico{display:grid;place-items:center;width:46px;height:46px;border-radius:15px;background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err);animation:lockPulse 2.2s ease-in-out infinite}
+.lock h2{margin:0;font-size:18px;line-height:1.25;letter-spacing:-.01em;font-weight:700}
+.lock p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.lock-vers{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600}
+.lock-vers .arrow{color:var(--muted)}
+.lock-notes{display:flex;flex-direction:column;gap:10px;max-height:190px;overflow-y:auto;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}
+.lock-notes b{font-size:12.5px}
+.lock-notes ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px;line-height:1.5}
+.lock-actions{display:flex;flex-direction:column;gap:8px}
+.lock-actions .btn{width:100%}
+.lock-hint{text-align:center;font-size:11.5px!important}
+@keyframes lockBg{from{opacity:0}to{opacity:1}}
+@keyframes lockCard{from{opacity:0;transform:translateY(20px) scale(.94)}to{opacity:1;transform:none}}
+@keyframes lockPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--err) 35%,transparent)}50%{box-shadow:0 0 0 9px transparent}}
 .cl ul{margin:0;padding-left:18px;color:var(--muted);font-size:12.5px;line-height:1.5}
 #in-cfg{height:64px;min-height:64px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;word-break:break-all}
 .cfg-msg{min-height:16px;font-size:12px;color:var(--muted)}
@@ -3522,7 +3554,12 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     /* ---------- updates ---------- */
 
-    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, announce: false, showOld: false };
+    const UPD_POLL = 2 * 60 * 1000; // background re-check, so nobody has to press "Check for updates"
+    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, manual: false, announce: false, showLog: false, showOld: false };
+    let forceLocked = false;
+    let forceTimer = 0;
+    let forceWarned = false;
+    let updWatchStarted = false;
 
     function cmpVer(a, b) {
         const pa = String(a).split('.').map(function (n) { return parseInt(n, 10) || 0; });
@@ -3538,17 +3575,23 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         return UPDATE_BASE.indexOf('YOUR_USER') === -1;
     }
 
+    // changelog.json entry: { "version": "5.0", "date": "...", "force": true, "notes": ["..."] }
+    // "force" defaults to true (emergency update). Put "force": false to make an update optional.
+    function normEntry(e) {
+        return {
+            version: e.version,
+            date: typeof e.date === 'string' ? e.date : '',
+            force: e.force !== false,
+            notes: Array.isArray(e.notes) ? e.notes.map(String) : []
+        };
+    }
+
     function parseChangelog(text) {
         try {
             const j = JSON.parse(text);
             const arr = Array.isArray(j) ? j : (j && j.versions) || [];
-            return arr.filter(function (e) { return e && typeof e.version === 'string'; }).map(function (e) {
-                return {
-                    version: e.version,
-                    date: typeof e.date === 'string' ? e.date : '',
-                    notes: Array.isArray(e.notes) ? e.notes.map(String) : []
-                };
-            }).sort(function (a, b) { return cmpVer(b.version, a.version); }).slice(0, 10);
+            return arr.filter(function (e) { return e && typeof e.version === 'string'; }).map(normEntry)
+                .sort(function (a, b) { return cmpVer(b.version, a.version); }).slice(0, 10);
         } catch (e) {
             return null;
         }
@@ -3558,10 +3601,110 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         return !!updState.latest && cmpVer(updState.latest, SCRIPT_VERSION) > 0;
     }
 
+    function updForced() {
+        return updState.list.some(function (e) { return e.force && cmpVer(e.version, SCRIPT_VERSION) > 0; });
+    }
+
     function logCurrentNotes() {
         const cur = updState.list.filter(function (e) { return e.version === SCRIPT_VERSION; })[0];
         if (!cur) return;
         cur.notes.forEach(function (n) { log('  \u2022 ' + n, 'info'); });
+    }
+
+    /* ---------- emergency update lock ---------- */
+
+    function lockHtml() {
+        const newer = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) > 0; });
+        const notes = newer.filter(function (e) { return e.notes.length; }).map(function (e) {
+            return '<div><b>v' + escapeHtml(e.version) + '</b><ul>' +
+                e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul></div>';
+        }).join('');
+        return '<div class="lock-card">' +
+            '<div class="lock-ico">' + icon('alert', 24) + '</div>' +
+            '<h2 id="lock-title">Update required</h2>' +
+            '<div class="lock-vers"><span>v' + escapeHtml(SCRIPT_VERSION) + '</span><span class="arrow" aria-hidden="true">\u2192</span><span class="cl-tag cl-new">v' + escapeHtml(updState.latest) + '</span></div>' +
+            '<p>This version is out of date and has been disabled. Install the update to keep using ' + escapeHtml(APP_NAME) + '.</p>' +
+            (notes ? '<div class="lock-notes">' + notes + '</div>' : '') +
+            '<div class="lock-actions">' +
+            '<button type="button" class="btn btn-primary" id="lock-update">Update now</button>' +
+            '<button type="button" class="btn btn-ghost" id="lock-reload">I installed it \u2014 reload page</button>' +
+            '</div>' +
+            '<p class="lock-hint">In the Tampermonkey tab press Install, then come back and reload.</p>' +
+            '</div>';
+    }
+
+    function setLockInert(on) {
+        ['#fab', '#panel'].forEach(function (sel) {
+            const n = $(sel);
+            if (!n) return;
+            if (on) n.setAttribute('inert', '');
+            else n.removeAttribute('inert');
+        });
+    }
+
+    function showLock() {
+        if (!root) return;
+        forceLocked = true;
+        let box = $('#lock');
+        if (!box) {
+            box = el('div', 'lock');
+            box.id = 'lock';
+            box.setAttribute('role', 'alertdialog');
+            box.setAttribute('aria-modal', 'true');
+            box.setAttribute('aria-labelledby', 'lock-title');
+            box.addEventListener('click', function (e) {
+                const t = e.target.closest ? e.target.closest('button') : null;
+                if (!t) return;
+                if (t.id === 'lock-update') window.open(SCRIPT_URL + '?t=' + Date.now(), '_blank');
+                else if (t.id === 'lock-reload') location.reload();
+            });
+            ['keydown', 'keyup', 'keypress'].forEach(function (ev) {
+                box.addEventListener(ev, function (e) { e.stopPropagation(); });
+            });
+            root.appendChild(box);
+        }
+        const sig = SCRIPT_VERSION + '>' + updState.latest + '|' + JSON.stringify(updState.list);
+        if (box.dataset.sig !== sig) {
+            box.dataset.sig = sig;
+            box.innerHTML = lockHtml();
+        }
+        setLockInert(true);
+        if (host) host.classList.add('locked');
+    }
+
+    function removeLock() {
+        forceLocked = false;
+        forceWarned = false;
+        const box = $('#lock');
+        if (box) box.remove();
+        setLockInert(false);
+        if (host) host.classList.remove('locked');
+    }
+
+    // Lock the tool when a newer forced version exists. A running upload is never cut in half:
+    // the lock appears right after it ends.
+    function applyForceLock() {
+        if (!host || !host.isConnected) return;
+        if (!(updIsNewer() && updForced())) {
+            if (forceLocked) removeLock();
+            return;
+        }
+        if (uploading || resuming) {
+            if (!forceWarned) {
+                forceWarned = true;
+                setStatus('Update v' + updState.latest + ' is required. The tool locks when this upload ends.', 'warn');
+            }
+            if (!forceTimer) {
+                forceTimer = setInterval(function () {
+                    if (uploading || resuming) return;
+                    clearInterval(forceTimer);
+                    forceTimer = 0;
+                    applyForceLock();
+                }, 1000);
+            }
+            return;
+        }
+        showLock();
     }
 
     async function checkUpdates(manual) {
@@ -3572,11 +3715,13 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             return;
         }
         updState.busy = true;
-        renderUpdates();
+        updState.manual = !!manual;
+        if (manual) renderUpdates();
         try {
             const r = await gmOnce(CHANGELOG_URL + '?t=' + Date.now(), 'text', 15000);
             const list = parseChangelog(r.data);
             if (!list || !list.length) throw new Error('Bad changelog file');
+            const hadNewer = updIsNewer();
             updState.list = list;
             updState.latest = list[0].version;
             updState.error = '';
@@ -3587,52 +3732,75 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
                 logCurrentNotes();
             }
             if (updIsNewer()) {
-                log('Update available: v' + updState.latest, 'info');
+                if (!hadNewer) log('Update available: v' + updState.latest, 'info');
                 if (manual) setStatus('Update v' + updState.latest + ' is available.', 'ok');
             } else if (manual) {
                 setStatus('You are on the latest version.', 'ok');
             }
         } catch (e) {
             updState.error = (e && e.message) || 'failed';
-            log('Update check failed: ' + updState.error, 'warn');
-            if (manual) setStatus('Could not check for updates.', 'warn');
+            if (manual) {
+                log('Update check failed: ' + updState.error, 'warn');
+                setStatus('Could not check for updates.', 'warn');
+            }
         } finally {
             updState.busy = false;
+            updState.manual = false;
             renderUpdates();
+            applyForceLock();
         }
     }
+
+    const CHEV = '<svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 
     function renderUpdates() {
         const box = $('#upd-box');
         if (!box) return;
         const newer = updIsNewer();
+        const checking = updState.busy && updState.manual;
         const hv = $('#head-ver');
         if (hv) hv.textContent = 'v' + SCRIPT_VERSION + (newer ? ' \u00b7 update v' + updState.latest : '');
         let desc;
         if (!updConfigured()) desc = 'Updates are not set up yet.';
-        else if (updState.busy) desc = 'Checking\u2026';
+        else if (checking) desc = 'Checking\u2026';
         else if (newer) desc = 'New version v' + updState.latest + ' is available.';
         else if (updState.error) desc = 'Could not reach the update server.';
         else if (updState.checked) desc = 'You have the latest version.';
         else desc = 'Not checked yet.';
+
+        // Rebuild only when the data really changed, so an open changelog is never reset by a background check.
+        const sig = JSON.stringify([desc, newer, checking, updState.list]);
+        if (box.dataset.sig === sig) return;
+        box.dataset.sig = sig;
+
         let html = '<div class="row static stack"><span class="row-text"><span class="row-title">Version ' + escapeHtml(SCRIPT_VERSION) + '</span><span class="row-desc">' + escapeHtml(desc) + '</span></span>' +
-            '<div class="row-actions"><button type="button" class="btn" id="btn-upd-check"' + (updState.busy ? ' disabled' : '') + '>Check for updates</button>' +
+            '<div class="row-actions"><button type="button" class="btn" id="btn-upd-check"' + (checking ? ' disabled' : '') + '>Check for updates</button>' +
             (newer ? '<button type="button" class="btn btn-primary" id="btn-upd-now">Update now</button>' : '') + '</div></div>';
         let fresh = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) >= 0; });
         let older = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) < 0; });
         if (!fresh.length && older.length) { fresh = older.slice(0, 1); older = older.slice(1); }
-        function entryHtml(e) {
+        function entryHtml(e, i) {
             const cur = e.version === SCRIPT_VERSION;
-            return '<div class="cl"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
+            const isNew = cmpVer(e.version, SCRIPT_VERSION) > 0;
+            return '<div class="cl" style="--i:' + i + '"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
                 (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') +
-                (cur ? '<span class="cl-tag">installed</span>' : '') + '</div>' +
+                (cur ? '<span class="cl-tag">installed</span>' : '') +
+                (isNew ? '<span class="cl-tag cl-new">new</span>' : '') + '</div>' +
                 (e.notes.length ? '<ul>' + e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
         }
-        fresh.forEach(function (e) { html += entryHtml(e); });
-        if (older.length) {
-            html += '<div class="cl-more"><button type="button" class="btn btn-ghost" id="btn-upd-old" aria-expanded="' + (updState.showOld ? 'true' : 'false') + '">' +
-                (updState.showOld ? 'Hide older versions' : 'Show older versions (' + older.length + ')') + '</button></div>';
-            if (updState.showOld) older.forEach(function (e) { html += entryHtml(e); });
+        if (updState.list.length) {
+            html += '<button type="button" class="cl-toggle" id="btn-cl" aria-expanded="' + (updState.showLog ? 'true' : 'false') + '" aria-controls="cl-body">' +
+                '<span>Changelog</span><span class="cl-meta">' + updState.list.length + (updState.list.length === 1 ? ' version' : ' versions') + '</span>' + CHEV + '</button>';
+            html += '<div class="collapse' + (updState.showLog ? ' open' : '') + '" id="cl-body"><div class="collapse-in">';
+            fresh.forEach(function (e, i) { html += entryHtml(e, i); });
+            if (older.length) {
+                html += '<div class="cl-more"><button type="button" class="btn btn-ghost" id="btn-upd-old" data-count="' + older.length + '" aria-controls="cl-old" aria-expanded="' + (updState.showOld ? 'true' : 'false') + '">' +
+                    (updState.showOld ? 'Hide older versions' : 'Show older versions (' + older.length + ')') + '</button></div>';
+                html += '<div class="collapse' + (updState.showOld ? ' open' : '') + '" id="cl-old"><div class="collapse-in">';
+                older.forEach(function (e, i) { html += entryHtml(e, i); });
+                html += '</div></div>';
+            }
+            html += '</div></div>';
         }
         box.innerHTML = html;
     }
@@ -3645,13 +3813,25 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             if (!t) return;
             if (t.id === 'btn-upd-check') checkUpdates(true);
             else if (t.id === 'btn-upd-now') window.open(SCRIPT_URL + '?t=' + Date.now(), '_blank');
-            else if (t.id === 'btn-upd-old') { updState.showOld = !updState.showOld; renderUpdates(); }
+            else if (t.id === 'btn-cl') {
+                // toggle classes on the live nodes (no re-render) so the CSS transition can play
+                updState.showLog = !updState.showLog;
+                t.setAttribute('aria-expanded', updState.showLog ? 'true' : 'false');
+                const body = $('#cl-body');
+                if (body) body.classList.toggle('open', updState.showLog);
+            } else if (t.id === 'btn-upd-old') {
+                updState.showOld = !updState.showOld;
+                t.setAttribute('aria-expanded', updState.showOld ? 'true' : 'false');
+                t.textContent = updState.showOld ? 'Hide older versions' : 'Show older versions (' + (t.getAttribute('data-count') || '') + ')';
+                const old = $('#cl-old');
+                if (old) old.classList.toggle('open', updState.showOld);
+            }
         });
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem(UPD_KEY) || 'null'); } catch (e) {}
         if (cached && Array.isArray(cached.list)) {
-            updState.list = cached.list;
-            updState.latest = cached.list[0] ? cached.list[0].version : '';
+            updState.list = cached.list.filter(function (e) { return e && typeof e.version === 'string'; }).map(normEntry);
+            updState.latest = updState.list[0] ? updState.list[0].version : '';
             updState.checked = cached.ts || 0;
         }
         let seen = '';
@@ -3666,7 +3846,22 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             }
         }
         renderUpdates();
-        if (!updState.checked || Date.now() - updState.checked > UPD_EVERY || updState.announce || updIsNewer()) checkUpdates(false);
+        applyForceLock();   // instant, from the cached list
+        checkUpdates(false); // and a fresh check on every page load, no button needed
+
+        if (!updWatchStarted) {
+            updWatchStarted = true;
+            setInterval(function () {
+                if (host && host.isConnected) checkUpdates(false);
+            }, UPD_POLL);
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden && host && host.isConnected && Date.now() - updState.checked > 30 * 1000) checkUpdates(false);
+            });
+            // if someone strips the overlay in devtools, put it back
+            setInterval(function () {
+                if (forceLocked && host && host.isConnected && !$('#lock')) showLock();
+            }, 1000);
+        }
     }
 
     function applyScale() {
