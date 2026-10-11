@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      5.3
+// @version      5.4
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -35,7 +35,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.3';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.4';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -320,6 +320,37 @@
     let runState = null;
     const blobCache = new Map();
     const logLines = [];
+    const LOG_KEY = 'mcu_log_v1';
+    let logSaveTimer = 0;
+
+    // Logs survive page reloads: they are kept in localStorage and only the Clear button wipes them.
+    function loadLogs() {
+        try {
+            const a = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+            if (Array.isArray(a)) {
+                a.forEach(function (e) {
+                    if (e && typeof e.msg === 'string' && isFinite(e.t)) {
+                        logLines.push({ t: +e.t, level: String(e.level || 'info'), msg: e.msg });
+                    }
+                });
+            }
+        } catch (e) {}
+        while (logLines.length > LOG_LIMIT) logLines.shift();
+    }
+
+    function saveLogsNow() {
+        clearTimeout(logSaveTimer);
+        logSaveTimer = 0;
+        try { localStorage.setItem(LOG_KEY, JSON.stringify(logLines)); } catch (e) {}
+    }
+
+    function saveLogsSoon() {
+        if (!logSaveTimer) logSaveTimer = setTimeout(saveLogsNow, 400);
+    }
+
+    loadLogs();
+    window.addEventListener('pagehide', saveLogsNow);
+    window.addEventListener('beforeunload', saveLogsNow);
 
     function loadPanelOpen() {
         try { return localStorage.getItem(PANEL_KEY) === '1'; } catch (e) { return false; }
@@ -2967,6 +2998,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         const entry = { t: Date.now(), level: level, msg: String(msg) };
         logLines.push(entry);
         while (logLines.length > LOG_LIMIT) logLines.shift();
+        saveLogsSoon();
         if (settings.debug) {
             try { console.log('[MCU]', msg); } catch (e) {}
         }
@@ -5240,6 +5272,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         });
         $('#btn-clear-log').addEventListener('click', function () {
             logLines.length = 0;
+            saveLogsNow();
             renderLog();
         });
     }
