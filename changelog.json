@@ -1,5 +1,14 @@
 [
   {
+    "version": "5.1",
+    "date": "2026-10-11",
+    "notes": [
+      "Added RGB style: Solid or Gradient",
+      "Added Gradient angle slider",
+      "Added RGB Speed slider"
+    ]
+  },
+  {
     "version": "5.0",
     "date": "2026-10-11",
     "notes": [
