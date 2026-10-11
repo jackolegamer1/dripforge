@@ -1,1 +1,18 @@
-test
+[
+  {
+    "version": "4.6",
+    "date": "2026-10-11",
+    "notes": [
+      "Changed UI Stuff",
+      "Changed Sound Effects",
+      "Added Changelog"
+    ]
+  },
+  {
+    "version": "4.6",
+    "date": "2026-10-01",
+    "notes": [
+      "Previous release"
+    ]
+  }
+]
