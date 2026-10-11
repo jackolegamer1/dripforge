@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      5.1
+// @version      5.2
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -16,12 +16,13 @@
 // @connect      api.coolpixels.net
 // @connect      *.rbxcdn.com
 // @connect      raw.githubusercontent.com
+// @connect      github.com
 // @connect      i.redd.it
 // @connect      redd.it
 // @connect      fonts.googleapis.com
 // @connect      fonts.gstatic.com
-// @updateURL    https://raw.githubusercontent.com/jackolegamer1/dripforge/main/pavels-drip-forge.user.js
-// @downloadURL  https://raw.githubusercontent.com/jackolegamer1/dripforge/main/pavels-drip-forge.user.js
+// @updateURL    https://github.com/jackolegamer1/dripforge/raw/refs/heads/main/pavels-drip-forge.user.js
+// @downloadURL  https://github.com/jackolegamer1/dripforge/raw/refs/heads/main/pavels-drip-forge.user.js
 // @run-at       document-idle
 // @noframes
 // ==/UserScript==
@@ -35,7 +36,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.1';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.2';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -43,10 +44,9 @@
     const TAB_SESSION_KEY = 'mcu_tab_v1';
     const GROUP_HASH = '#groupcreations';
     const AUTHOR = 'Pavel';
-    // Auto-update: put the script and changelog.json in one GitHub repo and set the same path here and in @updateURL/@downloadURL
-    const UPDATE_BASE = 'https://raw.githubusercontent.com/jackolegamer1/dripforge/main/';
-    const SCRIPT_URL = UPDATE_BASE + 'pavels-drip-forge.user.js';
-    const CHANGELOG_URL = UPDATE_BASE + 'changelog.json';
+    // Auto-update: the changelog is read from raw.githubusercontent.com, the script is installed from github.com/raw
+    const CHANGELOG_URL = 'https://raw.githubusercontent.com/jackolegamer1/dripforge/refs/heads/main/changelog.json';
+    const SCRIPT_URL = 'https://github.com/jackolegamer1/dripforge/raw/refs/heads/main/pavels-drip-forge.user.js';
     const UPD_KEY = 'mcu_upd_v1';
     const SEEN_KEY = 'mcu_seenver_v1';
     const UPD_EVERY = 6 * 60 * 60 * 1000;
@@ -158,12 +158,6 @@
             typesEnabled: true,
             debug: false,
             colorMain: '#3a5a9b',
-            rgbTheme: false,
-            rgbBright: 75,
-            rgbSoft: 0,
-            rgbMode: 'solid',
-            rgbAngle: 135,
-            rgbSpeed: 100,
             delaySec: 1.5,
             strictVerify: true,
             lowercaseNames: false,
@@ -192,11 +186,6 @@
         if (!/^(tl|tr|bl|br)$/.test(out.corner)) out.corner = def.corner;
         out.soundVolume = isFinite(out.soundVolume) ? clamp(Math.round(out.soundVolume), 0, 100) : def.soundVolume;
         out.uiScale = isFinite(out.uiScale) ? clamp(Math.round(out.uiScale), SCALE_MIN, SCALE_MAX) : def.uiScale;
-        out.rgbBright = isFinite(out.rgbBright) ? clamp(Math.round(out.rgbBright), 20, 100) : def.rgbBright;
-        out.rgbSoft = isFinite(out.rgbSoft) ? clamp(Math.round(out.rgbSoft), 0, 100) : def.rgbSoft;
-        if (out.rgbMode !== 'gradient') out.rgbMode = 'solid';
-        out.rgbAngle = isFinite(out.rgbAngle) ? clamp(Math.round(out.rgbAngle), 0, 360) : def.rgbAngle;
-        out.rgbSpeed = isFinite(out.rgbSpeed) ? clamp(Math.round(out.rgbSpeed), 25, 300) : def.rgbSpeed;
         return out;
     }
 
@@ -903,19 +892,74 @@
         const options = readGroupOptions(sel);
         if (cacheGroups(options)) renderGroupSelect();
 
+        await guardGroup();
+    }
+
+    function pickGroupOption(sel) {
+        const want = wantedGroup();
+        if (!want.value && !want.label) return null;
+        const options = readGroupOptions(sel);
+        return options.filter(function (g) { return want.value && g.value === want.value; })[0] ||
+            options.filter(function (g) { return want.label && g.label.toLowerCase() === want.label.toLowerCase(); })[0] || null;
+    }
+
+    function groupIsSet(sel, opt) {
+        if (!sel || !opt) return false;
+        if (String(sel.value) !== opt.value) return false;
+        const o = sel.options[sel.selectedIndex];
+        return !!o && String(o.value) === opt.value;
+    }
+
+    // Instant (no waiting) check used right before the submit click.
+    // true  = safe to submit (not group mode, "keep the site's selection", or the right group is set)
+    let groupListSeen = false;
+
+    function groupOkNow() {
+        if (activeMode() !== 'group') return true;
+        const want = wantedGroup();
+        if (!want.value && !want.label) return true;
+        const sel = findGroupSelect();
+        if (!sel) return !groupListSeen; // no list on this page at all = nothing to check
+        return groupIsSet(sel, pickGroupOption(sel));
+    }
+
+    function groupError(msg) {
+        const e = new Error(msg);
+        e.groupMismatch = true;
+        return e;
+    }
+
+    /* Makes sure the right group is set AND stays set for a moment. The site re-renders its form after
+     * a group change, after a finished upload and after a file is chosen, and a re-render can drop the
+     * list back to the first group. Never lets an upload go out while a wrong group is selected. */
+    async function guardGroup() {
+        if (activeMode() !== 'group') return;
         const want = wantedGroup();
         if (!want.value && !want.label) return;
-        const opt = options.filter(function (g) { return want.value && g.value === want.value; })[0] ||
-            options.filter(function (g) { return want.label && g.label.toLowerCase() === want.label.toLowerCase(); })[0];
-        if (!opt) throw new Error('The group "' + (want.label || want.value) + '" is not in the site\'s group list.');
-        if (String(sel.value) === opt.value) return;
-
-        setStatus('Choosing the group: ' + opt.label + '…');
-        setSelectValue(sel, opt.value);
-        await sleep(700);
-        await waitUntil(function () { return !!getFormEls(); }, 15000);
-        sel = findGroupSelect();
-        if (sel && String(sel.value) !== opt.value) throw new Error('Could not select the group "' + opt.label + '" on the page.');
+        const label = want.label || want.value;
+        for (let i = 0; i < 5; i++) {
+            let sel = findGroupSelect();
+            if (!sel) {
+                await waitUntil(function () { return !!findGroupSelect(); }, 4000);
+                sel = findGroupSelect();
+            }
+            if (!sel) throw groupError('The group list disappeared. Nothing was uploaded.');
+            groupListSeen = true;
+            const opt = pickGroupOption(sel);
+            if (!opt) throw new Error('The group "' + label + '" is not in the site\'s group list.');
+            if (!groupIsSet(sel, opt)) {
+                setStatus('Choosing the group: ' + opt.label + '…');
+                setSelectValue(sel, opt.value);
+                await sleep(700);
+                await waitUntil(function () { return !!getFormEls(); }, 15000);
+                continue;
+            }
+            // it has to stay put: look again after a short pause
+            await sleep(450);
+            sel = findGroupSelect();
+            if (sel && groupIsSet(sel, pickGroupOption(sel))) return;
+        }
+        throw groupError('The site keeps switching away from the group "' + label + '". Nothing was uploaded, so nothing lands in the wrong group.');
     }
 
     async function waitForFormEls(timeout) {
@@ -1396,6 +1440,8 @@
             t0: Date.now(),
             assetId: ''
         };
+        // last instant check, no waiting between it and the click
+        if (!groupOkNow()) throw groupError('The wrong group is selected on the page. Nothing was uploaded.');
         runState.inflight = inf;
         saveQueue();
         persistRun();
@@ -1478,8 +1524,10 @@
         const price = effectivePrice(item);
 
         let outcome = null;
+        let groupTries = 0;
         for (let attempt = 0; ; attempt++) {
             await waitForFormEls(20000);
+            await ensureGroupSelected();
             await waitUntil(function () {
                 const e = getFormEls();
                 return !e || !e.btn.disabled;
@@ -1498,7 +1546,20 @@
             }, 10000);
             if (!ready) throw new Error('The site did not accept the name or file (the submit button stayed disabled).');
 
-            outcome = await submitAndConfirm(item, displayName, price);
+            try {
+                outcome = await submitAndConfirm(item, displayName, price);
+            } catch (err) {
+                // the group slipped away between filling the form and the click: nothing was sent, so just redo this item
+                if (err && err.groupMismatch && groupTries < 4 && !stopFlag) {
+                    groupTries++;
+                    attempt--;
+                    runState.inflight = null;
+                    persistRun();
+                    log('The group changed while the form was being filled. Fixing it and trying again (' + groupTries + '/4).', 'warn');
+                    continue;
+                }
+                throw err;
+            }
 
             if (outcome.state === 'fail' && outcome.retriable && attempt < 2 && !stopFlag) {
                 const wait = outcome.retryAfter || 15000 * (attempt + 1);
@@ -2336,16 +2397,6 @@ button.logo:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 font-family:var(--display);font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;box-shadow:0 8px 22px -6px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.18);will-change:transform,opacity}
 
 /* ---------- color picker ---------- */
-.swatch-rgb{display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:48px;padding:0 12px;border-radius:999px;color:#fff;font-size:11px;font-weight:800;letter-spacing:.07em;cursor:pointer;
-background:linear-gradient(100deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#af52de,#ff2d55,#ff3b30) 0 0/96px 100% repeat-x;animation:rgbSlide 5s linear infinite;
-text-shadow:0 1px 2px rgba(0,0,0,.5);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
-.swatch-rgb.sel::after{display:none}
-@keyframes rgbSlide{to{background-position:96px 0}}
-.rgb-opts{display:flex;flex-direction:column;gap:8px;padding:10px 4px 2px}
-.rgb-row{display:flex;flex-direction:column;gap:0}
-.rgb-row>.seg{margin:4px 0 2px}
-.rgb-pad{padding:2px 0 4px}
-.rgb-row>span{font-size:12px;font-weight:600;color:var(--muted)}
 .swatch-custom{background:conic-gradient(from 90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#5856d6,#af52de,#ff2d55,#ff3b30);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
 .swatch-custom::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--cc,var(--surface-2));box-shadow:0 0 0 1px rgba(0,0,0,.2)}
 .swatch-custom:not(.sel)::after{content:"";position:absolute;inset:0;
@@ -2410,17 +2461,37 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 /* ---------- forced update lock ---------- */
 .lock{position:fixed;inset:0;z-index:2147483600;display:grid;place-items:center;padding:16px;background:color-mix(in srgb,#05070d 64%,transparent);-webkit-backdrop-filter:blur(10px) saturate(1.2);backdrop-filter:blur(10px) saturate(1.2);animation:lockBg .35s var(--ease) both}
 .lock-card{zoom:var(--z,1);width:min(420px,100%);max-height:calc(90vh / var(--z,1));overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:22px;border:1px solid var(--border);border-radius:22px;background:var(--bg);color:var(--text);box-shadow:var(--shadow);animation:lockCard .6s var(--spring) .05s both}
-.lock-ico{display:grid;place-items:center;width:46px;height:46px;border-radius:15px;background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err);animation:lockPulse 2.2s ease-in-out infinite}
+.lock-head{display:flex;align-items:center;gap:13px}
+.lock-ico{display:grid;place-items:center;width:46px;height:46px;flex-shrink:0;border-radius:15px;background:color-mix(in srgb,var(--err) 14%,transparent);color:var(--err);animation:lockPulse 2.2s ease-in-out infinite}
 .lock h2{margin:0;font-size:18px;line-height:1.25;letter-spacing:-.01em;font-weight:700}
 .lock p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
-.lock-vers{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600}
+.lock .lock-sub{margin-top:2px;font-size:12.5px}
+.lock-vers{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:14px;background:var(--surface);font-size:12.5px;font-weight:600}
 .lock-vers .arrow{color:var(--muted)}
-.lock-notes{display:flex;flex-direction:column;gap:10px;max-height:190px;overflow-y:auto;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}
-.lock-notes b{font-size:12.5px}
+.lock-count{margin-left:auto;color:var(--muted);font-size:11.5px;font-weight:500}
+.lock-label{padding:0 2px;font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.lock-notes{display:flex;flex-direction:column;gap:12px;max-height:170px;overflow-y:auto;padding:12px 14px;border:1px solid var(--border);border-radius:14px;background:var(--surface);overscroll-behavior:contain}
+.lock-ver-h{display:flex;align-items:center;gap:8px}
+.lock-ver-h b{font-size:12.5px}
+.lock-ver-h span{color:var(--muted);font-size:11.5px}
 .lock-notes ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:12.5px;line-height:1.5}
+.lock-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;counter-reset:ls}
+.lock-steps li{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12.5px;line-height:1.35;transition:color .3s var(--ease)}
+.lock-steps li::before{counter-increment:ls;content:counter(ls);display:grid;place-items:center;width:22px;height:22px;flex-shrink:0;border:1px solid var(--border-strong);border-radius:50%;font-size:11px;font-weight:700;transition:background-color .3s,border-color .3s,color .3s,transform .4s var(--spring)}
+.lock-steps li.on{color:var(--text);font-weight:600}
+.lock-steps li.on::before{background:var(--grad);border-color:transparent;color:var(--accent-fg);transform:scale(1.08)}
+.lock-steps li.done::before{content:"\\2713";background:color-mix(in srgb,var(--ok) 16%,transparent);border-color:transparent;color:var(--ok)}
+.lock-steps b{color:var(--text)}
 .lock-actions{display:flex;flex-direction:column;gap:8px}
-.lock-actions .btn{width:100%}
-.lock-hint{text-align:center;font-size:11.5px!important}
+.lock-actions>.btn{width:100%}
+.lock-row{display:flex;gap:8px}
+.lock-row .btn{flex:1;min-height:36px}
+.lock-msg{min-height:16px;text-align:center;font-size:12px!important}
+.lock-msg.ok{color:var(--ok)!important}
+.lock-msg.warn{color:var(--warn)!important}
+.cl-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-top:1px solid var(--border)}
+.cl-pager .btn{min-height:34px;padding:0 12px}
+.cl-page{color:var(--muted);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
 @keyframes lockBg{from{opacity:0}to{opacity:1}}
 @keyframes lockCard{from{opacity:0;transform:translateY(20px) scale(.94)}to{opacity:1;transform:none}}
 @keyframes lockPulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--err) 35%,transparent)}50%{box-shadow:0 0 0 9px transparent}}
@@ -2554,14 +2625,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
           </div>
           <label class="row"><span class="row-text"><span class="row-title">Mute all sounds</span><span class="row-desc">Turns off every click, menu and notification sound.</span></span><span class="switch"><input type="checkbox" id="set-mute"><span class="slider"></span></span></label>
           <div class="row static stack"><span class="row-text"><span class="row-title">Theme color</span><span class="row-desc">Used for buttons, progress and highlights.</span></span>
-            <div class="swatches" id="swatches">${swatches}<button type="button" class="swatch swatch-rgb" id="btn-rgb" aria-pressed="false" aria-controls="rgb-opts" aria-label="RGB theme" title="RGB theme: smoothly cycling rainbow"><span>RGB</span></button><button type="button" class="swatch swatch-custom" id="btn-custom" aria-expanded="false" aria-controls="picker" aria-label="Custom color" title="Custom color"></button></div>
-            <div class="collapse" id="rgb-opts"><div class="collapse-in"><div class="rgb-opts">
-              <div class="rgb-row"><span>Style</span><div class="seg" id="seg-rgbmode" role="group" aria-label="RGB style"><button type="button" data-rgbmode="solid" aria-pressed="true">Solid</button><button type="button" data-rgbmode="gradient" aria-pressed="false">Gradient</button></div></div>
-              <div class="collapse" id="rgb-angle"><div class="collapse-in"><div class="rgb-row rgb-pad"><span>Gradient angle</span><div class="scale-row"><input type="range" class="range" id="in-rgb-angle" min="0" max="360" step="5" aria-label="Gradient angle"><output class="scale-out" id="out-rgb-angle">135\u00b0</output></div></div></div></div>
-              <div class="rgb-row"><span>Speed</span><div class="scale-row"><input type="range" class="range" id="in-rgb-speed" min="25" max="300" step="5" aria-label="RGB speed"><output class="scale-out" id="out-rgb-speed">100%</output></div></div>
-              <div class="rgb-row"><span>Brightness</span><div class="scale-row"><input type="range" class="range" id="in-rgb-bright" min="20" max="100" step="1" aria-label="RGB brightness"><output class="scale-out" id="out-rgb-bright">75%</output></div></div>
-              <div class="rgb-row"><span>Pastel</span><div class="scale-row"><input type="range" class="range" id="in-rgb-soft" min="0" max="100" step="1" aria-label="RGB pastel"><output class="scale-out" id="out-rgb-soft">0%</output></div></div>
-            </div></div></div>
+            <div class="swatches" id="swatches">${swatches}<button type="button" class="swatch swatch-custom" id="btn-custom" aria-expanded="false" aria-controls="picker" aria-label="Custom color" title="Custom color"></button></div>
             <div class="picker" id="picker"><div class="picker-in"><div class="pk">
               <div class="pk-sv" id="pk-sv" tabindex="0" role="slider" aria-label="Saturation and brightness" aria-valuemin="0" aria-valuemax="100"><div class="pk-thumb" id="pk-sv-thumb"></div></div>
               <div class="pk-mid">
@@ -2795,63 +2859,12 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         return out;
     }
 
-    /* ---------- RGB theme ---------- */
-
-    const RGB_PERIOD = 12000; // ms for one full trip around the color wheel
-    let rgbHue = 0;
-    let rgbRaf = 0;
-    let rgbLast = 0;
-
-    // Brightness 20-100 sets how dark the color is, Pastel 0-100 washes it out toward white.
-    function rgbColorAt(h) {
-        const b = clamp(settings.rgbBright, 20, 100);
-        const soft = clamp(settings.rgbSoft, 0, 100) / 100;
-        const c = hsvToRgb(h, 0.72, 0.3 + 0.62 * (b - 20) / 80);
-        const hex = rgbToHex(c[0], c[1], c[2]);
-        return soft ? mixWithWhite(hex, soft * 0.62) : hex;
-    }
-
-    function rgbTick(ts) {
-        rgbRaf = 0;
-        if (!settings.rgbTheme || !host || !host.isConnected) return;
-        if (ts - rgbLast >= 40) {   // ~25 fps is plenty for a slow color drift
-            const dt = rgbLast ? Math.min(ts - rgbLast, 250) : 0;
-            rgbLast = ts;
-            // phase-based, so changing the speed never makes the color jump
-            rgbHue = (rgbHue + dt / RGB_PERIOD * 360 * clamp(settings.rgbSpeed, 25, 300) / 100) % 360;
-            applyAccent();
-        }
-        rgbRaf = requestAnimationFrame(rgbTick);
-    }
-
-    function syncRgbLoop() {
-        if (settings.rgbTheme && host && host.isConnected) {
-            if (!rgbRaf) { rgbLast = 0; rgbRaf = requestAnimationFrame(rgbTick); }
-        } else if (rgbRaf) {
-            cancelAnimationFrame(rgbRaf);
-            rgbRaf = 0;
-        }
-    }
-
     // Only the color variables (cheap, safe to call on every frame while dragging the picker).
     function applyAccent() {
         if (!host) return;
-        const rgbOn = !!settings.rgbTheme;
-        const gradient = rgbOn && settings.rgbMode === 'gradient';
-        let base = settings.colorMain;
-        if (gradient) {
-            // three stops spread around the wheel; the middle one drives the flat accent so everything matches
-            const c1 = rgbColorAt(rgbHue), c2 = rgbColorAt((rgbHue + 70) % 360), c3 = rgbColorAt((rgbHue + 140) % 360);
-            host.style.setProperty('--grad', 'linear-gradient(' + settings.rgbAngle + 'deg,' + c1 + ' 0%,' + c2 + ' 50%,' + c3 + ' 100%)');
-            base = c2;
-        } else {
-            host.style.removeProperty('--grad');
-            if (rgbOn) base = rgbColorAt(rgbHue);
-        }
         // Fills stay close to the chosen color. Text and outlines are lifted so they read on pure black.
-        // (The RGB theme keeps its fill exactly as set, so the Brightness slider can really go dark.)
-        const accent = settings.dark && !rgbOn ? liftTo(base, 0.06) : base;
-        const ring = settings.dark ? liftTo(base, 0.3) : base;
+        const accent = settings.dark ? liftTo(settings.colorMain, 0.06) : settings.colorMain;
+        const ring = settings.dark ? liftTo(settings.colorMain, 0.3) : settings.colorMain;
         host.style.setProperty('--accent', accent);
         host.style.setProperty('--accent-fg', foregroundFor(accent));
         host.style.setProperty('--ring', ring);
@@ -2860,7 +2873,6 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     function applyTheme() {
         if (!host) return;
         applyAccent();
-        syncRgbLoop();
         host.classList.toggle('dark', !!settings.dark);
         const tb = $('#btn-theme');
         if (tb) {
@@ -3444,7 +3456,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     function updatePageChip() {
         const chip = $('#page-chip');
         const info = VIEW_MAP[getView()];
-        if (chip) chip.textContent = info ? info.label + (groupHashOn() ? ' \u00b7 Group' : ' Page') : '';
+        if (chip) chip.textContent = info ? info.label + (groupHashOn() ? ' \u00b7 group' : ' page') : '';
     }
 
     function renderAll() {
@@ -3513,12 +3525,6 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         const vo = $('#out-volume');
         if (vo) vo.textContent = settings.soundVolume + '%';
         set('#in-scale', 'value', String(settings.uiScale));
-        set('#in-rgb-bright', 'value', String(settings.rgbBright));
-        set('#in-rgb-soft', 'value', String(settings.rgbSoft));
-        const rbo = $('#out-rgb-bright');
-        if (rbo) rbo.textContent = settings.rgbBright + '%';
-        const rso = $('#out-rgb-soft');
-        if (rso) rso.textContent = settings.rgbSoft + '%';
         const so = $('#out-scale');
         if (so) so.textContent = settings.uiScale + '%';
         root.querySelectorAll('#seg-mode button').forEach(function (b) {
@@ -3534,36 +3540,18 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     function syncSwatches() {
         const current = String(settings.colorMain).toLowerCase();
-        const rgbOn = !!settings.rgbTheme;
         let isPreset = false;
         root.querySelectorAll('.swatch[data-color]').forEach(function (sw) {
-            const match = (sw.getAttribute('data-color') || '').toLowerCase() === current;
-            if (match) isPreset = true;
-            sw.classList.toggle('sel', match && !rgbOn);
+            const sel = (sw.getAttribute('data-color') || '').toLowerCase() === current;
+            if (sel) isPreset = true;
+            sw.classList.toggle('sel', sel);
         });
         const cb = $('#btn-custom');
         if (cb) {
-            cb.classList.toggle('sel', !isPreset && !rgbOn);
+            cb.classList.toggle('sel', !isPreset);
             if (isPreset) cb.style.removeProperty('--cc');
             else cb.style.setProperty('--cc', settings.colorMain);
         }
-        const rb = $('#btn-rgb');
-        if (rb) {
-            rb.classList.toggle('sel', rgbOn);
-            rb.setAttribute('aria-pressed', rgbOn ? 'true' : 'false');
-        }
-        const ro = $('#rgb-opts');
-        if (ro) ro.classList.toggle('open', rgbOn);
-        const ra = $('#rgb-angle');
-        if (ra) ra.classList.toggle('open', rgbOn && settings.rgbMode === 'gradient');
-        root.querySelectorAll('#seg-rgbmode button').forEach(function (b) {
-            b.setAttribute('aria-pressed', b.getAttribute('data-rgbmode') === settings.rgbMode ? 'true' : 'false');
-        });
-        [['#in-rgb-angle', '#out-rgb-angle', settings.rgbAngle, '\u00b0'], ['#in-rgb-speed', '#out-rgb-speed', settings.rgbSpeed, '%']].forEach(function (c) {
-            const i = $(c[0]), o = $(c[1]);
-            if (i && i !== root.activeElement) i.value = String(c[2]);
-            if (o) o.textContent = c[2] + c[3];
-        });
     }
 
     // Google Fonts are fetched by the userscript manager (the site's security rules can block
@@ -3659,11 +3647,16 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     /* ---------- updates ---------- */
 
     const UPD_POLL = 2 * 60 * 1000; // background re-check, so nobody has to press "Check for updates"
-    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, manual: false, announce: false, showLog: false, showOld: false };
+    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, manual: false, announce: false, showLog: false, showOld: false, oldPage: 0 };
     let forceLocked = false;
     let forceTimer = 0;
     let forceWarned = false;
     let updWatchStarted = false;
+    let lockStep = 0;      // 0 = fresh, 1 = update page opened, waiting for the install
+    let lockBusy = false;
+    let lockMsg = '';
+    let lockMsgKind = '';
+    const CL_PAGE = 4;     // older changelog entries shown per page
 
     function cmpVer(a, b) {
         const pa = String(a).split('.').map(function (n) { return parseInt(n, 10) || 0; });
@@ -3676,7 +3669,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     }
 
     function updConfigured() {
-        return UPDATE_BASE.indexOf('YOUR_USER') === -1;
+        return true;
     }
 
     // changelog.json entry: { "version": "5.0", "date": "...", "force": true, "notes": ["..."] }
@@ -3695,7 +3688,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             const j = JSON.parse(text);
             const arr = Array.isArray(j) ? j : (j && j.versions) || [];
             return arr.filter(function (e) { return e && typeof e.version === 'string'; }).map(normEntry)
-                .sort(function (a, b) { return cmpVer(b.version, a.version); }).slice(0, 10);
+                .sort(function (a, b) { return cmpVer(b.version, a.version); }).slice(0, 200);
         } catch (e) {
             return null;
         }
@@ -3719,22 +3712,88 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     function lockHtml() {
         const newer = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) > 0; });
-        const notes = newer.filter(function (e) { return e.notes.length; }).map(function (e) {
-            return '<div><b>v' + escapeHtml(e.version) + '</b><ul>' +
+        const withNotes = newer.filter(function (e) { return e.notes.length; });
+        const notes = withNotes.map(function (e) {
+            return '<div class="lock-ver"><div class="lock-ver-h"><b>v' + escapeHtml(e.version) + '</b>' +
+                (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') + '</div><ul>' +
                 e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul></div>';
         }).join('');
-        return '<div class="lock-card">' +
-            '<div class="lock-ico">' + icon('alert', 24) + '</div>' +
-            '<h2 id="lock-title">Update required</h2>' +
-            '<div class="lock-vers"><span>v' + escapeHtml(SCRIPT_VERSION) + '</span><span class="arrow" aria-hidden="true">\u2192</span><span class="cl-tag cl-new">v' + escapeHtml(updState.latest) + '</span></div>' +
-            '<p>This version is out of date and has been disabled. Install the update to keep using ' + escapeHtml(APP_NAME) + '.</p>' +
-            (notes ? '<div class="lock-notes">' + notes + '</div>' : '') +
+        const s1 = lockStep === 0 ? 'on' : 'done';
+        const s2 = lockStep === 1 ? 'on' : '';
+        const s3 = '';
+        return '<div class="lock-head">' +
+            '<div class="lock-ico">' + icon('alert', 22) + '</div>' +
+            '<div><h2 id="lock-title">Update required</h2>' +
+            '<p class="lock-sub">This version is out of date and was switched off.</p></div></div>' +
+            '<div class="lock-vers"><span>v' + escapeHtml(SCRIPT_VERSION) + '</span><span class="arrow" aria-hidden="true">\u2192</span>' +
+            '<span class="cl-tag cl-new">v' + escapeHtml(updState.latest) + '</span>' +
+            '<span class="lock-count">' + newer.length + (newer.length === 1 ? ' update' : ' updates') + '</span></div>' +
+            (notes ? '<div class="lock-label">What\u2019s new</div><div class="lock-notes" tabindex="0">' + notes + '</div>' : '') +
+            '<ol class="lock-steps">' +
+            '<li class="' + s1 + '">Open the update page</li>' +
+            '<li class="' + s2 + '">Press <b>Install</b> in the Tampermonkey tab</li>' +
+            '<li class="' + s3 + '">Come back here and reload the page</li>' +
+            '</ol>' +
             '<div class="lock-actions">' +
-            '<button type="button" class="btn btn-primary" id="lock-update">Update now</button>' +
-            '<button type="button" class="btn btn-ghost" id="lock-reload">I installed it \u2014 reload page</button>' +
-            '</div>' +
-            '<p class="lock-hint">In the Tampermonkey tab press Install, then come back and reload.</p>' +
-            '</div>';
+            (lockStep === 0
+                ? '<button type="button" class="btn btn-primary" id="lock-update">' + icon('upload', 16) + 'Update now</button>'
+                : '<button type="button" class="btn btn-primary" id="lock-reload">' + icon('check', 16) + 'I installed it \u2014 reload page</button>' +
+                  '<button type="button" class="btn btn-ghost" id="lock-update">Open the update page again</button>') +
+            '<div class="lock-row">' +
+            '<button type="button" class="btn btn-ghost" id="lock-copy">' + icon('copy', 15) + 'Copy link</button>' +
+            '<button type="button" class="btn btn-ghost" id="lock-check"' + (lockBusy ? ' disabled' : '') + '>' +
+            (lockBusy ? icon('spinner', 15) + 'Checking\u2026' : 'Check again') + '</button>' +
+            '</div></div>' +
+            '<p class="lock-msg ' + escapeHtml(lockMsgKind) + '" role="status" aria-live="polite">' + escapeHtml(lockMsg) + '</p>';
+    }
+
+    function setLockMsg(text, kind) {
+        lockMsg = text || '';
+        lockMsgKind = kind || '';
+        if (forceLocked) showLock();
+    }
+
+    function openUpdatePage() {
+        let w = null;
+        try { w = window.open(SCRIPT_URL + '?t=' + Date.now(), '_blank'); } catch (e) {}
+        lockStep = 1;
+        if (!w) setLockMsg('The browser blocked the new tab. Use Copy link and open it yourself.', 'warn');
+        else setLockMsg('', '');
+    }
+
+    function copyUpdateLink() {
+        const done = function () { setLockMsg('Link copied. Paste it in a new tab.', 'ok'); };
+        const fail = function () { setLockMsg('Could not copy. Link: ' + SCRIPT_URL, 'warn'); };
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(SCRIPT_URL).then(done, function () {
+                    try {
+                        const ta = document.createElement('textarea');
+                        ta.value = SCRIPT_URL;
+                        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+                        document.body.appendChild(ta);
+                        ta.select();
+                        const ok = document.execCommand('copy');
+                        ta.remove();
+                        if (ok) done(); else fail();
+                    } catch (e) { fail(); }
+                });
+                return;
+            }
+        } catch (e) {}
+        fail();
+    }
+
+    async function lockCheckAgain() {
+        if (lockBusy) return;
+        lockBusy = true;
+        setLockMsg('', '');
+        await checkUpdates(true);
+        lockBusy = false;
+        if (forceLocked) {
+            if (updState.error) setLockMsg('Could not reach the update server. Try again in a moment.', 'warn');
+            else setLockMsg('Checked just now: v' + updState.latest + ' is still required.', '');
+        }
     }
 
     function setLockInert(on) {
@@ -3756,21 +3815,36 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             box.setAttribute('role', 'alertdialog');
             box.setAttribute('aria-modal', 'true');
             box.setAttribute('aria-labelledby', 'lock-title');
+            const card = el('div', 'lock-card');
+            card.id = 'lock-card';
+            box.appendChild(card);
             box.addEventListener('click', function (e) {
                 const t = e.target.closest ? e.target.closest('button') : null;
                 if (!t) return;
-                if (t.id === 'lock-update') window.open(SCRIPT_URL + '?t=' + Date.now(), '_blank');
+                if (t.id === 'lock-update') openUpdatePage();
                 else if (t.id === 'lock-reload') location.reload();
+                else if (t.id === 'lock-copy') copyUpdateLink();
+                else if (t.id === 'lock-check') lockCheckAgain();
             });
             ['keydown', 'keyup', 'keypress'].forEach(function (ev) {
                 box.addEventListener(ev, function (e) { e.stopPropagation(); });
             });
             root.appendChild(box);
         }
-        const sig = SCRIPT_VERSION + '>' + updState.latest + '|' + JSON.stringify(updState.list);
+        const sig = SCRIPT_VERSION + '>' + updState.latest + '|' + JSON.stringify(updState.list) + '|' + lockStep + '|' + lockBusy + '|' + lockMsg + '|' + lockMsgKind;
         if (box.dataset.sig !== sig) {
+            const first = !box.dataset.sig;
             box.dataset.sig = sig;
-            box.innerHTML = lockHtml();
+            const card = box.querySelector('#lock-card');
+            const keepScroll = card ? card.querySelector('.lock-notes') : null;
+            const top = keepScroll ? keepScroll.scrollTop : 0;
+            if (card) card.innerHTML = lockHtml();
+            const notesNode = card ? card.querySelector('.lock-notes') : null;
+            if (notesNode && top) notesNode.scrollTop = top;
+            if (first) {
+                const pb = box.querySelector('#lock-update');
+                if (pb && pb.focus) { try { pb.focus({ preventScroll: true }); } catch (e) {} }
+            }
         }
         setLockInert(true);
         if (host) host.classList.add('locked');
@@ -3779,6 +3853,10 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     function removeLock() {
         forceLocked = false;
         forceWarned = false;
+        lockStep = 0;
+        lockBusy = false;
+        lockMsg = '';
+        lockMsgKind = '';
         const box = $('#lock');
         if (box) box.remove();
         setLockInert(false);
@@ -3822,7 +3900,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         updState.manual = !!manual;
         if (manual) renderUpdates();
         try {
-            const r = await gmOnce(CHANGELOG_URL + '?t=' + Date.now(), 'text', 15000);
+            const r = await gmOnce(CHANGELOG_URL + '?t=' + Math.floor(Date.now() / 60000), 'text', 12000);
             const list = parseChangelog(r.data);
             if (!list || !list.length) throw new Error('Bad changelog file');
             const hadNewer = updIsNewer();
@@ -3857,6 +3935,46 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     const CHEV = '<svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 
+    // New and installed versions stay in plain view; everything older is browsed page by page.
+    function splitLog() {
+        let fresh = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) >= 0; });
+        let older = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) < 0; });
+        if (!fresh.length && older.length) { fresh = older.slice(0, 1); older = older.slice(1); }
+        return { fresh: fresh, older: older };
+    }
+
+    function clEntryHtml(e, i) {
+        const cur = e.version === SCRIPT_VERSION;
+        const isNew = cmpVer(e.version, SCRIPT_VERSION) > 0;
+        return '<div class="cl" style="--i:' + i + '"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
+            (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') +
+            (cur ? '<span class="cl-tag">installed</span>' : '') +
+            (isNew ? '<span class="cl-tag cl-new">new</span>' : '') + '</div>' +
+            (e.notes.length ? '<ul>' + e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+    }
+
+    function oldPageHtml() {
+        const older = splitLog().older;
+        const pages = Math.max(1, Math.ceil(older.length / CL_PAGE));
+        updState.oldPage = clamp(updState.oldPage || 0, 0, pages - 1);
+        const from = updState.oldPage * CL_PAGE;
+        let html = '';
+        older.slice(from, from + CL_PAGE).forEach(function (e, i) { html += clEntryHtml(e, i); });
+        if (pages > 1) {
+            html += '<div class="cl-pager">' +
+                '<button type="button" class="btn btn-ghost" id="cl-prev"' + (updState.oldPage === 0 ? ' disabled' : '') + ' aria-label="Newer versions">\u2039 Newer</button>' +
+                '<span class="cl-page">' + (updState.oldPage + 1) + ' / ' + pages + '</span>' +
+                '<button type="button" class="btn btn-ghost" id="cl-next"' + (updState.oldPage >= pages - 1 ? ' disabled' : '') + ' aria-label="Older versions">Older \u203a</button>' +
+                '</div>';
+        }
+        return html;
+    }
+
+    function refreshOldPage() {
+        const box = $('#cl-old-list');
+        if (box) box.innerHTML = oldPageHtml();
+    }
+
     function renderUpdates() {
         const box = $('#upd-box');
         if (!box) return;
@@ -3880,29 +3998,18 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         let html = '<div class="row static stack"><span class="row-text"><span class="row-title">Version ' + escapeHtml(SCRIPT_VERSION) + '</span><span class="row-desc">' + escapeHtml(desc) + '</span></span>' +
             '<div class="row-actions"><button type="button" class="btn" id="btn-upd-check"' + (checking ? ' disabled' : '') + '>Check for updates</button>' +
             (newer ? '<button type="button" class="btn btn-primary" id="btn-upd-now">Update now</button>' : '') + '</div></div>';
-        let fresh = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) >= 0; });
-        let older = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) < 0; });
-        if (!fresh.length && older.length) { fresh = older.slice(0, 1); older = older.slice(1); }
-        function entryHtml(e, i) {
-            const cur = e.version === SCRIPT_VERSION;
-            const isNew = cmpVer(e.version, SCRIPT_VERSION) > 0;
-            return '<div class="cl" style="--i:' + i + '"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
-                (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') +
-                (cur ? '<span class="cl-tag">Installed</span>' : '') +
-                (isNew ? '<span class="cl-tag cl-new">new</span>' : '') + '</div>' +
-                (e.notes.length ? '<ul>' + e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
-        }
+        const parts = splitLog();
+        const fresh = parts.fresh;
+        const older = parts.older;
         if (updState.list.length) {
             html += '<button type="button" class="cl-toggle" id="btn-cl" aria-expanded="' + (updState.showLog ? 'true' : 'false') + '" aria-controls="cl-body">' +
                 '<span>Changelog</span><span class="cl-meta">' + updState.list.length + (updState.list.length === 1 ? ' version' : ' versions') + '</span>' + CHEV + '</button>';
             html += '<div class="collapse' + (updState.showLog ? ' open' : '') + '" id="cl-body"><div class="collapse-in">';
-            fresh.forEach(function (e, i) { html += entryHtml(e, i); });
+            fresh.forEach(function (e, i) { html += clEntryHtml(e, i); });
             if (older.length) {
                 html += '<div class="cl-more"><button type="button" class="btn btn-ghost" id="btn-upd-old" data-count="' + older.length + '" aria-controls="cl-old" aria-expanded="' + (updState.showOld ? 'true' : 'false') + '">' +
                     (updState.showOld ? 'Hide older versions' : 'Show older versions (' + older.length + ')') + '</button></div>';
-                html += '<div class="collapse' + (updState.showOld ? ' open' : '') + '" id="cl-old"><div class="collapse-in">';
-                older.forEach(function (e, i) { html += entryHtml(e, i); });
-                html += '</div></div>';
+                html += '<div class="collapse' + (updState.showOld ? ' open' : '') + '" id="cl-old"><div class="collapse-in"><div id="cl-old-list">' + oldPageHtml() + '</div></div></div>';
             }
             html += '</div></div>';
         }
@@ -3923,6 +4030,9 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
                 t.setAttribute('aria-expanded', updState.showLog ? 'true' : 'false');
                 const body = $('#cl-body');
                 if (body) body.classList.toggle('open', updState.showLog);
+            } else if (t.id === 'cl-prev' || t.id === 'cl-next') {
+                updState.oldPage = Math.max(0, (updState.oldPage || 0) + (t.id === 'cl-next' ? 1 : -1));
+                refreshOldPage();
             } else if (t.id === 'btn-upd-old') {
                 updState.showOld = !updState.showOld;
                 t.setAttribute('aria-expanded', updState.showOld ? 'true' : 'false');
@@ -4443,7 +4553,6 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     }
 
     function pkCommit(final, forceHex) {
-        settings.rgbTheme = false;
         settings.colorMain = forceHex || pkHex();
         applyAccent();
         syncSwatches();
@@ -4593,7 +4702,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
      * Configs: share settings as a code (DF1:...) or a .json file
      * ==================================================================== */
 
-    const CONFIG_KEYS = ['colorMain', 'rgbTheme', 'rgbBright', 'rgbSoft', 'rgbMode', 'rgbAngle', 'rgbSpeed', 'dark', 'uiScale', 'corner', 'muteSounds', 'soundVolume', 'delaySec', 'strictVerify',
+    const CONFIG_KEYS = ['colorMain', 'dark', 'uiScale', 'corner', 'muteSounds', 'soundVolume', 'delaySec', 'strictVerify',
         'lowercaseNames', 'clearAfterUpload', 'typesEnabled', 'sharedName', 'salePrice'];
     const CONFIG_PREFIX = 'DF1:';
     let cfgBackup = null;
@@ -4953,35 +5062,9 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             const sw = e.target.closest ? e.target.closest('.swatch[data-color]') : null;
             if (!sw) return;
             settings.colorMain = sw.getAttribute('data-color');
-            settings.rgbTheme = false;
             saveSettings();
             applyTheme();
             syncSettingsUI();
-        });
-        $('#btn-rgb').addEventListener('click', function () {
-            settings.rgbTheme = !settings.rgbTheme;
-            saveSettings();
-            applyTheme();
-            syncSettingsUI();
-        });
-        [['#in-rgb-bright', '#out-rgb-bright', 'rgbBright', 20, 100, '%'], ['#in-rgb-soft', '#out-rgb-soft', 'rgbSoft', 0, 100, '%'],
-            ['#in-rgb-angle', '#out-rgb-angle', 'rgbAngle', 0, 360, '\u00b0'], ['#in-rgb-speed', '#out-rgb-speed', 'rgbSpeed', 25, 300, '%']].forEach(function (c) {
-            $(c[0]).addEventListener('input', function (e) {
-                const v = parseInt(e.target.value, 10);
-                settings[c[2]] = isFinite(v) ? clamp(v, c[3], c[4]) : settings[c[2]];
-                const out = $(c[1]);
-                if (out) out.textContent = settings[c[2]] + c[5];
-                applyAccent();
-            });
-            $(c[0]).addEventListener('change', function () { saveSettings(); });
-        });
-        $('#seg-rgbmode').addEventListener('click', function (e) {
-            const bt = e.target.closest ? e.target.closest('button[data-rgbmode]') : null;
-            if (!bt) return;
-            settings.rgbMode = bt.getAttribute('data-rgbmode') === 'gradient' ? 'gradient' : 'solid';
-            saveSettings();
-            applyAccent();
-            syncSwatches();
         });
         $('#seg-mode').addEventListener('click', function (e) {
             const b = e.target.closest ? e.target.closest('button[data-mode]') : null;
