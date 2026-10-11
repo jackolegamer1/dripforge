@@ -1,5 +1,13 @@
 [
   {
+    "version": "4.7",
+    "date": "2026-10-11",
+    "notes": [
+      "Added a sound volume slider in Settings (with a preview click)",
+      "Sound volume is included when you share your config code"
+    ]
+  },
+  {
     "version": "4.6",
     "date": "2026-10-11",
     "notes": [
