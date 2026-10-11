@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      4.7
+// @version      4.8
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -35,7 +35,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '4.7';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '4.8';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -2370,6 +2370,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 .cl-head b{font-weight:700;color:var(--text)}
 .cl-head span{color:var(--muted);font-size:11.5px}
 .cl-tag{padding:0 7px;border-radius:999px;background:var(--accent-soft);color:var(--ring)!important;font-weight:600}
+.cl-more{padding:10px 14px;border-top:1px solid var(--border)}
 .cl ul{margin:0;padding-left:18px;color:var(--muted);font-size:12.5px;line-height:1.5}
 #in-cfg{height:64px;min-height:64px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;word-break:break-all}
 .cfg-msg{min-height:16px;font-size:12px;color:var(--muted)}
@@ -3521,7 +3522,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     /* ---------- updates ---------- */
 
-    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, announce: false };
+    const updState = { latest: '', list: [], checked: 0, error: '', busy: false, announce: false, showOld: false };
 
     function cmpVer(a, b) {
         const pa = String(a).split('.').map(function (n) { return parseInt(n, 10) || 0; });
@@ -3617,13 +3618,22 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         let html = '<div class="row static stack"><span class="row-text"><span class="row-title">Version ' + escapeHtml(SCRIPT_VERSION) + '</span><span class="row-desc">' + escapeHtml(desc) + '</span></span>' +
             '<div class="row-actions"><button type="button" class="btn" id="btn-upd-check"' + (updState.busy ? ' disabled' : '') + '>Check for updates</button>' +
             (newer ? '<button type="button" class="btn btn-primary" id="btn-upd-now">Update now</button>' : '') + '</div></div>';
-        updState.list.forEach(function (e) {
+        let fresh = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) >= 0; });
+        let older = updState.list.filter(function (e) { return cmpVer(e.version, SCRIPT_VERSION) < 0; });
+        if (!fresh.length && older.length) { fresh = older.slice(0, 1); older = older.slice(1); }
+        function entryHtml(e) {
             const cur = e.version === SCRIPT_VERSION;
-            html += '<div class="cl"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
+            return '<div class="cl"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
                 (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') +
                 (cur ? '<span class="cl-tag">installed</span>' : '') + '</div>' +
                 (e.notes.length ? '<ul>' + e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
-        });
+        }
+        fresh.forEach(function (e) { html += entryHtml(e); });
+        if (older.length) {
+            html += '<div class="cl-more"><button type="button" class="btn btn-ghost" id="btn-upd-old" aria-expanded="' + (updState.showOld ? 'true' : 'false') + '">' +
+                (updState.showOld ? 'Hide older versions' : 'Show older versions (' + older.length + ')') + '</button></div>';
+            if (updState.showOld) older.forEach(function (e) { html += entryHtml(e); });
+        }
         box.innerHTML = html;
     }
 
@@ -3635,6 +3645,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             if (!t) return;
             if (t.id === 'btn-upd-check') checkUpdates(true);
             else if (t.id === 'btn-upd-now') window.open(SCRIPT_URL + '?t=' + Date.now(), '_blank');
+            else if (t.id === 'btn-upd-old') { updState.showOld = !updState.showOld; renderUpdates(); }
         });
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem(UPD_KEY) || 'null'); } catch (e) {}
