@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         pavel's Drip Forge
 // @namespace    http://tampermonkey.net/
-// @version      4.9
+// @version      5.0
 // @description  Drip Forge: mass upload clothing from Roblox (by link or ID) or local images, to your account or straight into a group. Verified uploads, per-item names and prices, adjustable UI size, resume after reload.
 // @author       pavel
 // @copyright    Pavel
@@ -35,7 +35,7 @@
      * Constants
      * ==================================================================== */
 
-    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '4.9';
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '5.0';
     const APP_NAME = 'Drip Forge';
     const LOGO_URL = 'https://i.redd.it/6tya8pktqnuf1.jpeg';
     const LOGO_KEY = 'mcu_logo_v1';
@@ -158,6 +158,9 @@
             typesEnabled: true,
             debug: false,
             colorMain: '#3a5a9b',
+            rgbTheme: false,
+            rgbBright: 75,
+            rgbSoft: 0,
             delaySec: 1.5,
             strictVerify: true,
             lowercaseNames: false,
@@ -186,6 +189,8 @@
         if (!/^(tl|tr|bl|br)$/.test(out.corner)) out.corner = def.corner;
         out.soundVolume = isFinite(out.soundVolume) ? clamp(Math.round(out.soundVolume), 0, 100) : def.soundVolume;
         out.uiScale = isFinite(out.uiScale) ? clamp(Math.round(out.uiScale), SCALE_MIN, SCALE_MAX) : def.uiScale;
+        out.rgbBright = isFinite(out.rgbBright) ? clamp(Math.round(out.rgbBright), 20, 100) : def.rgbBright;
+        out.rgbSoft = isFinite(out.rgbSoft) ? clamp(Math.round(out.rgbSoft), 0, 100) : def.rgbSoft;
         return out;
     }
 
@@ -2325,6 +2330,14 @@ button.logo:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 font-family:var(--display);font-size:13px;font-weight:700;letter-spacing:.01em;white-space:nowrap;box-shadow:0 8px 22px -6px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.18);will-change:transform,opacity}
 
 /* ---------- color picker ---------- */
+.swatch-rgb{display:inline-flex;align-items:center;justify-content:center;width:auto;min-width:48px;padding:0 12px;border-radius:999px;color:#fff;font-size:11px;font-weight:800;letter-spacing:.07em;cursor:pointer;
+background:linear-gradient(100deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#af52de,#ff2d55,#ff3b30) 0 0/96px 100% repeat-x;animation:rgbSlide 5s linear infinite;
+text-shadow:0 1px 2px rgba(0,0,0,.5);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+.swatch-rgb.sel::after{display:none}
+@keyframes rgbSlide{to{background-position:96px 0}}
+.rgb-opts{display:flex;flex-direction:column;gap:8px;padding:10px 4px 2px}
+.rgb-row{display:flex;flex-direction:column;gap:0}
+.rgb-row>span{font-size:12px;font-weight:600;color:var(--muted)}
 .swatch-custom{background:conic-gradient(from 90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#00c7be,#007aff,#5856d6,#af52de,#ff2d55,#ff3b30);cursor:pointer;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
 .swatch-custom::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--cc,var(--surface-2));box-shadow:0 0 0 1px rgba(0,0,0,.2)}
 .swatch-custom:not(.sel)::after{content:"";position:absolute;inset:0;
@@ -2533,7 +2546,11 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
           </div>
           <label class="row"><span class="row-text"><span class="row-title">Mute all sounds</span><span class="row-desc">Turns off every click, menu and notification sound.</span></span><span class="switch"><input type="checkbox" id="set-mute"><span class="slider"></span></span></label>
           <div class="row static stack"><span class="row-text"><span class="row-title">Theme color</span><span class="row-desc">Used for buttons, progress and highlights.</span></span>
-            <div class="swatches" id="swatches">${swatches}<button type="button" class="swatch swatch-custom" id="btn-custom" aria-expanded="false" aria-controls="picker" aria-label="Custom color" title="Custom color"></button></div>
+            <div class="swatches" id="swatches">${swatches}<button type="button" class="swatch swatch-rgb" id="btn-rgb" aria-pressed="false" aria-controls="rgb-opts" aria-label="RGB theme" title="RGB theme: smoothly cycling rainbow"><span>RGB</span></button><button type="button" class="swatch swatch-custom" id="btn-custom" aria-expanded="false" aria-controls="picker" aria-label="Custom color" title="Custom color"></button></div>
+            <div class="collapse" id="rgb-opts"><div class="collapse-in"><div class="rgb-opts">
+              <div class="rgb-row"><span>Brightness</span><div class="scale-row"><input type="range" class="range" id="in-rgb-bright" min="20" max="100" step="1" aria-label="RGB brightness"><output class="scale-out" id="out-rgb-bright">75%</output></div></div>
+              <div class="rgb-row"><span>Pastel</span><div class="scale-row"><input type="range" class="range" id="in-rgb-soft" min="0" max="100" step="1" aria-label="RGB pastel"><output class="scale-out" id="out-rgb-soft">0%</output></div></div>
+            </div></div></div>
             <div class="picker" id="picker"><div class="picker-in"><div class="pk">
               <div class="pk-sv" id="pk-sv" tabindex="0" role="slider" aria-label="Saturation and brightness" aria-valuemin="0" aria-valuemax="100"><div class="pk-thumb" id="pk-sv-thumb"></div></div>
               <div class="pk-mid">
@@ -2767,12 +2784,51 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         return out;
     }
 
+    /* ---------- RGB theme ---------- */
+
+    const RGB_PERIOD = 12000; // ms for one full trip around the color wheel
+    let rgbHue = 0;
+    let rgbRaf = 0;
+    let rgbLast = 0;
+
+    // Brightness 20-100 sets how dark the color is, Pastel 0-100 washes it out toward white.
+    function rgbColorAt(h) {
+        const b = clamp(settings.rgbBright, 20, 100);
+        const soft = clamp(settings.rgbSoft, 0, 100) / 100;
+        const c = hsvToRgb(h, 0.72, 0.3 + 0.62 * (b - 20) / 80);
+        const hex = rgbToHex(c[0], c[1], c[2]);
+        return soft ? mixWithWhite(hex, soft * 0.62) : hex;
+    }
+
+    function rgbTick(ts) {
+        rgbRaf = 0;
+        if (!settings.rgbTheme || !host || !host.isConnected) return;
+        if (ts - rgbLast >= 40) {   // ~25 fps is plenty for a slow color drift
+            rgbLast = ts;
+            rgbHue = (ts / RGB_PERIOD * 360) % 360;
+            applyAccent();
+        }
+        rgbRaf = requestAnimationFrame(rgbTick);
+    }
+
+    function syncRgbLoop() {
+        if (settings.rgbTheme && host && host.isConnected) {
+            if (!rgbRaf) rgbRaf = requestAnimationFrame(rgbTick);
+        } else if (rgbRaf) {
+            cancelAnimationFrame(rgbRaf);
+            rgbRaf = 0;
+        }
+    }
+
     // Only the color variables (cheap, safe to call on every frame while dragging the picker).
     function applyAccent() {
         if (!host) return;
+        const rgbOn = !!settings.rgbTheme;
+        const base = rgbOn ? rgbColorAt(rgbHue) : settings.colorMain;
         // Fills stay close to the chosen color. Text and outlines are lifted so they read on pure black.
-        const accent = settings.dark ? liftTo(settings.colorMain, 0.06) : settings.colorMain;
-        const ring = settings.dark ? liftTo(settings.colorMain, 0.3) : settings.colorMain;
+        // (The RGB theme keeps its fill exactly as set, so the Brightness slider can really go dark.)
+        const accent = settings.dark && !rgbOn ? liftTo(base, 0.06) : base;
+        const ring = settings.dark ? liftTo(base, 0.3) : base;
         host.style.setProperty('--accent', accent);
         host.style.setProperty('--accent-fg', foregroundFor(accent));
         host.style.setProperty('--ring', ring);
@@ -2781,6 +2837,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     function applyTheme() {
         if (!host) return;
         applyAccent();
+        syncRgbLoop();
         host.classList.toggle('dark', !!settings.dark);
         const tb = $('#btn-theme');
         if (tb) {
@@ -3364,7 +3421,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     function updatePageChip() {
         const chip = $('#page-chip');
         const info = VIEW_MAP[getView()];
-        if (chip) chip.textContent = info ? info.label + (groupHashOn() ? ' \u00b7 group' : ' page') : '';
+        if (chip) chip.textContent = info ? info.label + (groupHashOn() ? ' \u00b7 Group' : ' Page') : '';
     }
 
     function renderAll() {
@@ -3433,6 +3490,12 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
         const vo = $('#out-volume');
         if (vo) vo.textContent = settings.soundVolume + '%';
         set('#in-scale', 'value', String(settings.uiScale));
+        set('#in-rgb-bright', 'value', String(settings.rgbBright));
+        set('#in-rgb-soft', 'value', String(settings.rgbSoft));
+        const rbo = $('#out-rgb-bright');
+        if (rbo) rbo.textContent = settings.rgbBright + '%';
+        const rso = $('#out-rgb-soft');
+        if (rso) rso.textContent = settings.rgbSoft + '%';
         const so = $('#out-scale');
         if (so) so.textContent = settings.uiScale + '%';
         root.querySelectorAll('#seg-mode button').forEach(function (b) {
@@ -3448,18 +3511,26 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
 
     function syncSwatches() {
         const current = String(settings.colorMain).toLowerCase();
+        const rgbOn = !!settings.rgbTheme;
         let isPreset = false;
         root.querySelectorAll('.swatch[data-color]').forEach(function (sw) {
-            const sel = (sw.getAttribute('data-color') || '').toLowerCase() === current;
-            if (sel) isPreset = true;
-            sw.classList.toggle('sel', sel);
+            const match = (sw.getAttribute('data-color') || '').toLowerCase() === current;
+            if (match) isPreset = true;
+            sw.classList.toggle('sel', match && !rgbOn);
         });
         const cb = $('#btn-custom');
         if (cb) {
-            cb.classList.toggle('sel', !isPreset);
+            cb.classList.toggle('sel', !isPreset && !rgbOn);
             if (isPreset) cb.style.removeProperty('--cc');
             else cb.style.setProperty('--cc', settings.colorMain);
         }
+        const rb = $('#btn-rgb');
+        if (rb) {
+            rb.classList.toggle('sel', rgbOn);
+            rb.setAttribute('aria-pressed', rgbOn ? 'true' : 'false');
+        }
+        const ro = $('#rgb-opts');
+        if (ro) ro.classList.toggle('open', rgbOn);
     }
 
     // Google Fonts are fetched by the userscript manager (the site's security rules can block
@@ -3784,7 +3855,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             const isNew = cmpVer(e.version, SCRIPT_VERSION) > 0;
             return '<div class="cl" style="--i:' + i + '"><div class="cl-head"><b>v' + escapeHtml(e.version) + '</b>' +
                 (e.date ? '<span>' + escapeHtml(e.date) + '</span>' : '') +
-                (cur ? '<span class="cl-tag">installed</span>' : '') +
+                (cur ? '<span class="cl-tag">Installed</span>' : '') +
                 (isNew ? '<span class="cl-tag cl-new">new</span>' : '') + '</div>' +
                 (e.notes.length ? '<ul>' + e.notes.map(function (n) { return '<li>' + escapeHtml(n) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
         }
@@ -4339,6 +4410,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
     }
 
     function pkCommit(final, forceHex) {
+        settings.rgbTheme = false;
         settings.colorMain = forceHex || pkHex();
         applyAccent();
         syncSwatches();
@@ -4488,7 +4560,7 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
      * Configs: share settings as a code (DF1:...) or a .json file
      * ==================================================================== */
 
-    const CONFIG_KEYS = ['colorMain', 'dark', 'uiScale', 'corner', 'muteSounds', 'soundVolume', 'delaySec', 'strictVerify',
+    const CONFIG_KEYS = ['colorMain', 'rgbTheme', 'rgbBright', 'rgbSoft', 'dark', 'uiScale', 'corner', 'muteSounds', 'soundVolume', 'delaySec', 'strictVerify',
         'lowercaseNames', 'clearAfterUpload', 'typesEnabled', 'sharedName', 'salePrice'];
     const CONFIG_PREFIX = 'DF1:';
     let cfgBackup = null;
@@ -4848,9 +4920,26 @@ transition:background-color .2s,color .2s,transform .25s var(--spring)}
             const sw = e.target.closest ? e.target.closest('.swatch[data-color]') : null;
             if (!sw) return;
             settings.colorMain = sw.getAttribute('data-color');
+            settings.rgbTheme = false;
             saveSettings();
             applyTheme();
             syncSettingsUI();
+        });
+        $('#btn-rgb').addEventListener('click', function () {
+            settings.rgbTheme = !settings.rgbTheme;
+            saveSettings();
+            applyTheme();
+            syncSettingsUI();
+        });
+        [['#in-rgb-bright', '#out-rgb-bright', 'rgbBright', 20, 100], ['#in-rgb-soft', '#out-rgb-soft', 'rgbSoft', 0, 100]].forEach(function (c) {
+            $(c[0]).addEventListener('input', function (e) {
+                const v = parseInt(e.target.value, 10);
+                settings[c[2]] = isFinite(v) ? clamp(v, c[3], c[4]) : settings[c[2]];
+                const out = $(c[1]);
+                if (out) out.textContent = settings[c[2]] + '%';
+                applyAccent();
+            });
+            $(c[0]).addEventListener('change', function () { saveSettings(); });
         });
         $('#seg-mode').addEventListener('click', function (e) {
             const b = e.target.closest ? e.target.closest('button[data-mode]') : null;
