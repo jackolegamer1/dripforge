@@ -1,5 +1,14 @@
 [
   {
+    "version": "4.9",
+    "date": "2026-10-11",
+    "notes": [
+      "Added emergency updates: outdated versions ask you to update and are locked until you do",
+      "Added automatic update check, no need to press Check for updates",
+      "Changelog in Settings now opens and closes with a smooth animation"
+    ]
+  },
+  {
     "version": "4.8",
     "date": "2026-10-11",
     "notes": [
